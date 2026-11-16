@@ -1,0 +1,19 @@
+name: flightagent tests
+on:
+  push:
+    paths: ["flight-agent/**"]
+  pull_request:
+    paths: ["flight-agent/**"]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - run: pip install -e 'flight-agent[dev]' && pytest -q
+        working-directory: .
+      - run: npm test
+        working-directory: flight-agent/worker

@@ -142,8 +142,8 @@ class IgnavProvider:
         body["return_date"] = q.return_date.isoformat()
         return self._parse(self._call("/api/fares/round-trip", body))
 
-    def booking_link(self, offer_id: str, adults: int = 1) -> list[dict] | dict:
+    def booking_link(self, offer_id: str) -> list[dict] | dict:
         return self._call(
             "/api/fares/booking-links",
-            {"ignav_id": offer_id.removeprefix("ignav:"), "adults": adults},
+            {"ignav_id": offer_id.removeprefix("ignav:")},  # takes no passenger fields (HTTP 400)
         )

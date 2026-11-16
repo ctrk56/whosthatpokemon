@@ -1,0 +1,20 @@
+# Manual only. WARNING: GitHub Pages serves ONE site per repo. Running this replaces
+# whatever this repo currently publishes with the flight-agent web app.
+name: Deploy flight chat to GitHub Pages
+on: workflow_dispatch
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency: { group: pages, cancel-in-progress: false }
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: { name: github-pages, url: "${{ steps.deployment.outputs.page_url }}" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: flight-agent/web }
+      - id: deployment
+        uses: actions/deploy-pages@v4
