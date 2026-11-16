@@ -16,6 +16,7 @@ class Query:
     max_price: float | None = None
     airlines_include: tuple[str, ...] = ()
     airlines_exclude: tuple[str, ...] = ()
+    include_ground: bool = False  # buses/trains are excluded unless asked for
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,11 @@ class Segment:
     destination: str
     depart: datetime
     arrive: datetime
+    aircraft: str = ""
+
+    @property
+    def is_ground(self) -> bool:
+        return self.aircraft.strip().lower() in {"bus", "train", "rail", "ferry", "coach"}
 
 
 @dataclass(frozen=True)
@@ -69,11 +75,16 @@ class Offer:
     currency: str
     outbound: Leg
     inbound: Leg | None
-    checked_bags: int
+    checked_bags: int | None  # None = provider did not say
     booking_url: str
     fetched_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     # Set when an offer is assembled from two separate one-way tickets.
     construction: str = "single"
+
+    @property
+    def has_ground(self) -> bool:
+        legs = [self.outbound] + ([self.inbound] if self.inbound else [])
+        return any(s.is_ground for l in legs for s in l.segments)
 
     @property
     def stops(self) -> int:
@@ -109,7 +120,8 @@ class Offer:
             "ticketing": self.construction,
             "outbound": leg(self.outbound),
             "inbound": leg(self.inbound),
-            "checked_bags_included": self.checked_bags,
+            "checked_bags_included": self.checked_bags,  # null = unknown
+            "includes_ground_transport": self.has_ground,
             "booking_url": self.booking_url,
             "fetched_at": self.fetched_at.isoformat(timespec="seconds"),
         }

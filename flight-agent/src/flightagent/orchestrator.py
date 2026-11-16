@@ -33,7 +33,8 @@ def _combine(out: Offer, back: Offer) -> Offer:
         currency=out.currency,
         outbound=out.outbound,
         inbound=back.outbound,
-        checked_bags=min(out.checked_bags, back.checked_bags),
+        checked_bags=(None if out.checked_bags is None or back.checked_bags is None
+                      else min(out.checked_bags, back.checked_bags)),
         booking_url=f"{out.booking_url} | {back.booking_url}",
         construction="two_one_ways",
     )

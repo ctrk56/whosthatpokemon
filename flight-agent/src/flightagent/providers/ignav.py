@@ -62,6 +62,7 @@ def _leg(raw: dict) -> Leg:
             destination=s["arrival_airport"],
             depart=_dt(s["departure_time_local"]),
             arrive=_dt(s["arrival_time_local"]),
+            aircraft=s.get("aircraft") or "",
         )
         for s in raw["segments"]
     )
@@ -101,6 +102,7 @@ class IgnavProvider:
             "cabin_class": q.cabin,
             "market": self.market,
         }
+        # Ignav also returns buses (e.g. Flixbus); the ranker drops them unless include_ground.
         if q.max_stops is not None:
             body["max_stops"] = q.max_stops
         if q.max_price is not None:
@@ -123,7 +125,7 @@ class IgnavProvider:
                     currency=price.get("currency", "USD"),
                     outbound=_leg(it["outbound"]),
                     inbound=_leg(it["inbound"]) if it.get("inbound") else None,
-                    checked_bags=int((it.get("bags") or {}).get("checked", 0)),
+                    checked_bags=(it.get("bags") or {}).get("checked"),
                     booking_url="",  # resolved on demand via booking_link()
                 ))
             except (KeyError, TypeError, ValueError):

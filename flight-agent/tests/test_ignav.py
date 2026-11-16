@@ -57,3 +57,17 @@ def test_missing_key_raises(monkeypatch):
 def test_unknown_response_shape_returns_empty():
     p = IgnavProvider(api_key="k", transport=lambda *a: {"unexpected": 1})
     assert p.search_one_way(q()) == []
+
+
+LIVE = json.loads((Path(__file__).parent / "fixtures/ignav_live_one_way.json").read_text())
+
+
+def test_real_response_buses_are_excluded_and_bags_unknown():
+    from flightagent.ranker import rank
+    p = IgnavProvider(api_key="k", transport=lambda *a: LIVE)
+    offers = p.search_one_way(q())
+    assert len(offers) == 3 and offers[0].has_ground
+    assert {o.checked_bags for o in offers} <= {None, 0}  # key is absent on some itineraries
+    ranked = rank(offers, q())
+    assert ranked and not any(o.has_ground for o in ranked)
+    assert any(o.has_ground for o in rank(offers, q(include_ground=True)))

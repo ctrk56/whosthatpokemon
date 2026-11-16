@@ -13,5 +13,6 @@ flightagent                                                              # chat
 
 Set `providers = ["mock"]` in `config.toml` for offline sample data.
 
-Status: Ignav provider is built against the toolkit's documented API and fixtures; it has
-not yet been verified against live responses.
+Status: Ignav provider verified live (one-way and round trip, 5 home airports).
+Ignav also returns buses (Flixbus etc.); they are excluded unless `include_ground` is set.
+Baggage is often absent from Ignav responses and is reported as unknown.

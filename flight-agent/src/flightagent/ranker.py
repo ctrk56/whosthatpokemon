@@ -4,6 +4,8 @@ from .models import Offer, Query
 
 
 def passes_filters(o: Offer, q: Query) -> bool:
+    if o.has_ground and not q.include_ground:
+        return False
     if q.max_stops is not None and o.stops > q.max_stops:
         return False
     if q.max_price is not None and o.price > q.max_price:

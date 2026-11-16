@@ -48,6 +48,8 @@ TOOLS = [
                 "max_price": {"type": "number"},
                 "airlines_include": {"type": "array", "items": {"type": "string"}},
                 "airlines_exclude": {"type": "array", "items": {"type": "string"}},
+                "include_ground": {"type": "boolean",
+                                   "description": "Include buses/trains. Default false (flights only)."},
             },
             "required": ["destinations", "depart_date"],
         },
@@ -101,6 +103,7 @@ def build_query(args: dict, cfg: Config, today: date | None = None) -> Query:
         max_price=args.get("max_price"),
         airlines_include=tuple(a.upper() for a in args.get("airlines_include") or ()),
         airlines_exclude=tuple(a.upper() for a in args.get("airlines_exclude") or ()),
+        include_ground=bool(args.get("include_ground", False)),
     )
 
 
