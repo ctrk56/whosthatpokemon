@@ -16,7 +16,9 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="flightagent", description="Cheapest-flight chat agent")
     ap.add_argument("--config", default="config.toml")
     ap.add_argument("--raw", metavar="JSON",
-                    help="Skip the LLM: run search_flights with these JSON args and print the result")
+                    help="Skip the LLM: run a tool with these JSON args and print the result")
+    ap.add_argument("--tool", default="search_flights",
+                    help="Tool for --raw: search_flights (default), date_scan, resolve_airport")
     args = ap.parse_args(argv)
 
     config_mod.load_dotenv()
@@ -24,7 +26,7 @@ def main(argv: list[str] | None = None) -> int:
     runner = ToolRunner(cfg, build_providers(cfg.providers))
 
     if args.raw:
-        print(json.dumps(json.loads(runner.call("search_flights", json.loads(args.raw))), indent=2))
+        print(json.dumps(json.loads(runner.call(args.tool, json.loads(args.raw))), indent=2))
         return 0
 
     if not os.environ.get("ANTHROPIC_API_KEY"):

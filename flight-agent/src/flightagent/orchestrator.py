@@ -125,8 +125,13 @@ def search(
             if abs(diff) < 50 else None,
         }
 
+    best_by_origin: dict[str, float] = {}
+    for o in rank(candidates, q, 10_000):
+        best_by_origin.setdefault(o.outbound.origin, o.price)
+
     return {
         "offers": [o.summary() for o in top],
+        "best_price_by_origin_airport": best_by_origin,
         "construction_verdict": verdict,
         "sources_used": sorted({p.name for p in providers}),
         "errors": errors,

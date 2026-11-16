@@ -122,3 +122,10 @@ def test_multi_origin_round_trip_fans_out_and_never_mixes_airports():
     for o in res["offers"]:
         if o["ticketing"] == "two_one_ways":
             assert o["outbound"]["route"].split("->")[0] == o["inbound"]["route"].split("->")[1]
+
+
+def test_dedupe_keeps_same_flight_number_from_different_airports():
+    def mk(origin, price):
+        s = Segment("AA", "AA1", origin, "LAX", datetime(2026, 12, 1, 8), datetime(2026, 12, 1, 11))
+        return Offer(f"id{origin}", "t", price, "USD", Leg((s,)), None, 0, "u")
+    assert len(dedupe([mk("OAK", 100), mk("SJC", 120)])) == 2

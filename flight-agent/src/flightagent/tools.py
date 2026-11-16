@@ -7,6 +7,7 @@ from . import airports
 from .config import Config
 from .models import Query
 from .orchestrator import CallBudget, search
+from .scan import date_scan
 from .providers.base import FlightProvider
 
 TOOLS = [
@@ -52,6 +53,32 @@ TOOLS = [
                                    "description": "Include buses/trains. Default false (flights only)."},
             },
             "required": ["destinations", "depart_date"],
+        },
+    },
+    {
+        "name": "date_scan",
+        "description": (
+            "Scan a window of departure dates and return a price grid, the cheapest dates, "
+            "cheapest weekday and month, and the best price per airport. Use for flexible dates "
+            "or 'when is cheapest'. Set nights for round trips, omit for one-way. Long windows "
+            "are sampled evenly to respect the call budget; the result says when it sampled."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "origins": {"type": "array", "items": {"type": "string"},
+                            "description": "IATA codes; omit to use home airports"},
+                "destinations": {"type": "array", "items": {"type": "string"}},
+                "start_date": {"type": "string", "description": "first departure date YYYY-MM-DD"},
+                "end_date": {"type": "string", "description": "last departure date YYYY-MM-DD"},
+                "nights": {"type": "integer", "minimum": 1, "description": "trip length for round trips"},
+                "adults": {"type": "integer", "minimum": 1},
+                "cabin": {"type": "string",
+                          "enum": ["economy", "premium_economy", "business", "first"]},
+                "max_stops": {"type": "integer", "minimum": 0, "maximum": 2},
+                "max_price": {"type": "number"},
+            },
+            "required": ["destinations", "start_date", "end_date"],
         },
     },
 ]
@@ -107,6 +134,22 @@ def build_query(args: dict, cfg: Config, today: date | None = None) -> Query:
     )
 
 
+def build_scan(args: dict, cfg: Config, today: date | None = None):
+    today = today or date.today()
+    start = _date(args.get("start_date"), "start_date")
+    end = _date(args.get("end_date"), "end_date")
+    if end < start:
+        raise ToolError("end_date is before start_date")
+    start = max(start, today)  # never scan the past
+    if end < start:
+        raise ToolError(f"window is entirely in the past (today is {today})")
+    if (end - start).days + 1 > 366:
+        raise ToolError("window longer than 366 days")
+    nights = args.get("nights")
+    base = build_query({**args, "depart_date": start.isoformat(), "return_date": None}, cfg, today)
+    return base, start, end, int(nights) if nights else None
+
+
 class ToolRunner:
     def __init__(self, cfg: Config, providers: list[FlightProvider]):
         self.cfg, self.providers = cfg, providers
@@ -120,6 +163,9 @@ class ToolRunner:
             elif name == "search_flights":
                 q = build_query(args, self.cfg)
                 result = search(q, self.providers, CallBudget(self.cfg.call_budget))
+            elif name == "date_scan":
+                q, start, end, nights = build_scan(args, self.cfg)
+                result = date_scan(q, start, end, self.providers, CallBudget(self.cfg.call_budget), nights)
             else:
                 raise ToolError(f"unknown tool {name}")
         except ToolError as e:

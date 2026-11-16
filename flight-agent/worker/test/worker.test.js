@@ -110,3 +110,75 @@ test("handler: model API failure returns a generic 502 without leaking details",
   assert.equal(res.status, 502);
   assert.ok(!(await res.text()).includes("secret"));
 });
+
+// ---- M3: date scan ----
+import { dateScan, buildScan, evenly } from "../src/search.js";
+
+// Fake Ignav: price by airport offset and weekday (Tuesdays cheap), one itinerary per call.
+const OFFSET = { SCK: 0, OAK: 30, SFO: 60, SMF: 90, SJC: 120 };
+function fakeIgnav(counter) {
+  return async (url, init) => {
+    counter.n++;
+    const b = JSON.parse(init.body);
+    const day = new Date(b.departure_date + "T00:00:00Z");
+    const price = 200 + OFFSET[b.origin] - (day.getUTCDay() === 2 ? 80 : 0) + day.getUTCDate();
+    const seg = (o, d, dt) => ({ marketing_carrier_code: "AA", flight_number: `AA${dt.slice(8, 10)}`, departure_airport: o, arrival_airport: d,
+      departure_time_local: dt + "T09:00:00", arrival_time_local: dt + "T11:00:00", aircraft: "Boeing 737" });
+    const it = { ignav_id: `${b.origin}${b.departure_date}`, price: { amount: price, currency: "USD" },
+      outbound: { segments: [seg(b.origin, b.destination, b.departure_date)] },
+      inbound: b.return_date ? { segments: [seg(b.destination, b.origin, b.return_date)] } : null };
+    return new Response(JSON.stringify({ itineraries: [it] }));
+  };
+}
+const D = (n) => new Date(Date.parse("2026-12-01T00:00:00Z") + n * 86400000).toISOString().slice(0, 10);
+
+test("evenly matches the Python implementation", () => {
+  const xs = Array.from({ length: 31 }, (_, i) => i);
+  assert.deepEqual(evenly(xs, 5), [0, 8, 15, 23, 30]); // JS Math.round(22.5)=23 (Python gives 22)
+  assert.deepEqual(evenly(xs, 1), [15]);
+});
+
+test("scan: full grid, cheapest is a Tuesday from the cheapest airport", async () => {
+  const c = { n: 0 };
+  const r = await dateScan(q({ origins: ["SCK", "OAK"] }), D(0), D(6), null, { fetchFn: fakeIgnav(c), key: "k" }, 40);
+  assert.equal(r.dates_priced, 7); assert.equal(r.sampled, false); assert.equal(c.n, 14);
+  assert.equal(r.cheapest[0].weekday, "Tue"); assert.equal(r.cheapest[0].origin, "SCK");
+  assert.ok(r.by_weekday.Tue.min < r.by_weekday.Wed.min);
+  assert.ok(r.best_by_airport["SCK->LAX"].price < r.best_by_airport["OAK->LAX"].price);
+});
+
+test("scan: budget is never exceeded; probe keeps the cheapest airports", async () => {
+  const c = { n: 0 }, calls = [];
+  const inner = fakeIgnav(c);
+  const fetchFn = async (u, i) => { calls.push(JSON.parse(i.body).origin); return inner(u, i); };
+  const r = await dateScan(q({ origins: ["SCK", "OAK", "SFO", "SMF", "SJC"] }), D(0), D(29), null, { fetchFn, key: "k" }, 20);
+  assert.ok(c.n <= 20 && r.calls_used <= 20); assert.ok(r.sampled && r.note);
+  assert.ok(calls.includes("SCK") && calls.includes("OAK"));
+  assert.deepEqual([...r.airports_skipped_after_probe].sort(), ["SFO->LAX", "SJC->LAX", "SMF->LAX"]);
+});
+
+test("scan: round trip uses nights and the round-trip endpoint", async () => {
+  const urls = [];
+  const inner = fakeIgnav({ n: 0 });
+  const r = await dateScan(q({ origins: ["SCK"] }), D(0), D(2), 4, { fetchFn: async (u, i) => { urls.push(u); return inner(u, i); }, key: "k" }, 10);
+  assert.ok(urls.every((u) => u.endsWith("round-trip")));
+  assert.equal(r.grid[0].return, D(4)); assert.equal(r.mode, "round_trip");
+});
+
+test("scan: errors reported, month aggregation, validation", async () => {
+  const bad = await dateScan(q({ origins: ["SCK"] }), D(0), D(1), null, { fetchFn: async () => jres({}, 500), key: "k" }, 5);
+  assert.deepEqual(bad.grid, []); assert.equal(bad.errors.length, 2);
+  const r = await dateScan(q({ origins: ["SCK"] }), "2026-12-28", "2027-01-03", null, { fetchFn: fakeIgnav({ n: 0 }), key: "k" }, 20);
+  assert.deepEqual(Object.keys(r.by_month).sort(), ["2026-12", "2027-01"]);
+  const ctx = { homeAirports: HOME, today: "2026-11-16" };
+  assert.throws(() => buildScan({ destinations: ["LAX"], start_date: "2026-12-10", end_date: "2026-12-01" }, ctx));
+  assert.throws(() => buildScan({ destinations: ["LAX"], start_date: "2024-01-01", end_date: "2024-02-01" }, ctx));
+  assert.throws(() => buildScan({ destinations: ["LAX"], start_date: "2026-12-01", end_date: "2028-12-01" }, ctx));
+  const ok = buildScan({ destinations: ["LAX"], start_date: "2026-11-01", end_date: "2026-12-01", nights: 3 }, ctx);
+  assert.equal(ok.start, "2026-11-16"); assert.equal(ok.nights, 3); assert.deepEqual(ok.q.origins, HOME);
+});
+
+test("search result includes best price per origin airport", async () => {
+  const r = await searchFlights(q({ origins: ["OAK", "SJC"] }), { fetchFn: fakeIgnav({ n: 0 }), key: "k" });
+  assert.deepEqual(Object.keys(r.best_price_by_origin_airport).sort(), ["OAK", "SJC"]);
+});

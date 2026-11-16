@@ -25,7 +25,7 @@ def dedupe(offers: list[Offer]) -> list[Offer]:
     for o in offers:
         legs = [o.outbound] + ([o.inbound] if o.inbound else [])
         key = (o.construction,) + tuple(
-            tuple((s.flight_number, s.depart) for s in leg.segments) for leg in legs
+            tuple((s.flight_number, s.depart, s.origin, s.destination) for s in leg.segments) for leg in legs
         )
         if key not in best or o.price < best[key].price:
             best[key] = o

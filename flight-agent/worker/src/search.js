@@ -148,7 +148,7 @@ export function passesFilters(o, q) {
 export function rank(offers, q, limit = 5) {
   const best = new Map();
   for (const o of offers.filter((x) => passesFilters(x, q))) {
-    const key = [o.construction, ...[o.outbound, o.inbound].filter(Boolean).map((l) => l.segments.map((s) => s.flightNumber + s.depart).join(","))].join("|");
+    const key = [o.construction, ...[o.outbound, o.inbound].filter(Boolean).map((l) => l.segments.map((s) => `${s.flightNumber}@${s.depart}@${s.origin}-${s.destination}`).join(","))].join("|");
     if (!best.has(key) || o.price < best.get(key).price) best.set(key, o);
   }
   return [...best.values()].sort((a, b) => a.price - b.price || totalMin(a) - totalMin(b)).slice(0, limit);
@@ -217,8 +217,11 @@ export async function searchFlights(q, deps, budgetLimit = 40, limit = 5) {
       note: Math.abs(diff) < 50 ? "Under $50 apart: separate tickets are more flexible to change." : null,
     };
   }
+  const bestByOrigin = {};
+  for (const o of rank(candidates, q, 10_000)) bestByOrigin[o.outbound.origin] ??= o.price;
   return {
     offers: rank(candidates, q, limit).map((o) => summarize(o, fetchedAt)),
+    best_price_by_origin_airport: bestByOrigin,
     construction_verdict: verdict, sources_used: ["ignav"], errors, calls_used: used, call_budget: budgetLimit,
   };
 }
@@ -252,5 +255,107 @@ export function buildQuery(args, { homeAirports, today = new Date().toISOString(
     maxStops: args.max_stops ?? null, maxPrice: args.max_price ?? null,
     airlinesInclude: up(args.airlines_include), airlinesExclude: up(args.airlines_exclude),
     includeGround: Boolean(args.include_ground),
+  };
+}
+
+// ---------- flexible-date scan (port of flightagent/scan.py) ----------
+const DAY = 86400000;
+const addDays = (iso, n) => new Date(Date.parse(iso + "T00:00:00Z") + n * DAY).toISOString().slice(0, 10);
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const weekday = (iso) => WEEKDAYS[new Date(iso + "T00:00:00Z").getUTCDay()];
+const MAX_WINDOW_DAYS = 366;
+
+export function evenly(items, n) {
+  if (n >= items.length) return [...items];
+  if (n <= 1) return [items[Math.floor(items.length / 2)]];
+  return Array.from({ length: n }, (_, i) => items[Math.round((i * (items.length - 1)) / (n - 1))]);
+}
+
+export function buildScan(args, ctx) {
+  const today = ctx.today || new Date().toISOString().slice(0, 10);
+  const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s)) && !Number.isNaN(Date.parse(s));
+  if (!isDate(args.start_date)) throw new ToolError(`start_date: '${args.start_date}' is not a valid YYYY-MM-DD date`);
+  if (!isDate(args.end_date)) throw new ToolError(`end_date: '${args.end_date}' is not a valid YYYY-MM-DD date`);
+  if (args.end_date < args.start_date) throw new ToolError("end_date is before start_date");
+  const start = args.start_date < today ? today : args.start_date; // never scan the past
+  if (args.end_date < start) throw new ToolError(`window is entirely in the past (today is ${today})`);
+  if ((Date.parse(args.end_date) - Date.parse(start)) / DAY + 1 > MAX_WINDOW_DAYS) throw new ToolError(`window longer than ${MAX_WINDOW_DAYS} days`);
+  const nights = args.nights ? parseInt(args.nights) : null;
+  if (args.nights && !(nights >= 1)) throw new ToolError("nights must be at least 1");
+  const q = buildQuery({ ...args, depart_date: start, return_date: null }, { ...ctx, today });
+  return { q, start, end: args.end_date, nights };
+}
+
+export async function dateScan(q, start, end, nights, deps, budgetLimit = 40) {
+  const allDates = [];
+  for (let d = start; d <= end; d = addDays(d, 1)) allDates.push(d);
+  const pairs = q.origins.flatMap((o) => q.destinations.map((d) => [o, d]));
+  const results = new Map(); // "date|o|d" -> offer | null
+  const errors = [];
+  let used = 0;
+
+  const priceOne = async (d, o, dest) => {
+    const ret = nights ? addDays(d, nights) : null;
+    const body = ignavBody(q, o, dest, d, ret);
+    const resp = await ignavPost(ret ? "/api/fares/round-trip" : "/api/fares/one-way", body, deps);
+    return rank(parseIgnav(resp), { ...q, origins: [o], destinations: [dest], returnDate: ret }, 1)[0] || null;
+  };
+  const run = (tasks) => Promise.all(tasks.map(async ([d, o, dest]) => {
+    if (used >= budgetLimit) { errors.push(`ignav (${o}->${dest} ${d}): call budget exhausted`); return; }
+    used++;
+    try { results.set(`${d}|${o}|${dest}`, await priceOne(d, o, dest)); }
+    catch (e) { errors.push(`ignav (${o}->${dest} ${d}): ${e.message}`); }
+  }));
+
+  let chosen = pairs, dates = allDates, skipped = [];
+  if (pairs.length * allDates.length > budgetLimit) {
+    const probe = allDates[Math.floor(allDates.length / 2)];
+    await run(pairs.map(([o, d]) => [probe, o, d]));
+    const price = (p) => results.get(`${probe}|${p[0]}|${p[1]}`)?.price;
+    const priced = pairs.filter((p) => price(p) != null).sort((a, b) => price(a) - price(b));
+    const order = [...priced, ...pairs.filter((p) => !priced.includes(p))];
+    const remaining = budgetLimit - used;
+    chosen = Math.floor(remaining / 2) >= 3 ? order.slice(0, 2) : order.slice(0, 1);
+    skipped = order.slice(chosen.length).map(([o, d]) => `${o}->${d}`);
+    const nDates = Math.max(1, Math.min(allDates.length, Math.floor(remaining / chosen.length)));
+    dates = nDates > 1 ? [...new Set([...evenly(allDates, nDates), probe])].sort() : [probe];
+  }
+  await run(dates.flatMap((d) => chosen.map(([o, dest]) => [d, o, dest])).filter(([d, o, dest]) => !results.has(`${d}|${o}|${dest}`)));
+
+  const perDate = new Map();
+  for (const [key, offer] of results) {
+    if (!offer) continue;
+    const [d, o, dest] = key.split("|");
+    if (!perDate.has(d) || offer.price < perDate.get(d).offer.price) perDate.set(d, { offer, o, dest });
+  }
+  const grid = [...perDate.entries()].sort(([a], [b]) => (a < b ? -1 : 1)).map(([d, { offer, o, dest }]) => ({
+    depart: d, weekday: weekday(d), return: nights ? addDays(d, nights) : null, price: offer.price, currency: offer.currency,
+    origin: o, destination: dest, airlines: offer.outbound.airlines, stops: offerStops(offer), offer_id: offer.id,
+  }));
+  const agg = (keyFn) => {
+    const b = {};
+    for (const g of grid) (b[keyFn(g)] ||= []).push(g.price);
+    return Object.fromEntries(Object.entries(b).map(([k, v]) => [k, { min: Math.min(...v), avg: Math.round((v.reduce((a, c) => a + c, 0) / v.length) * 100) / 100, samples: v.length }]));
+  };
+  // Per-airport view uses every priced result, not just each date's winner.
+  const bestByAirport = {};
+  for (const [key, offer] of [...results].sort(([a], [b]) => (a < b ? -1 : 1))) {
+    if (!offer) continue;
+    const [d, o, dest] = key.split("|"), k = `${o}->${dest}`;
+    const cur = (bestByAirport[k] ||= { price: Infinity, dates_checked: 0 });
+    cur.dates_checked++;
+    if (offer.price < cur.price) Object.assign(cur, { price: offer.price, depart: d, return: nights ? addDays(d, nights) : null });
+  }
+  const datesSampled = dates.length < allDates.length;
+  const notes = [];
+  if (datesSampled) notes.push("dates were sampled evenly, so cheaper unsampled dates may exist");
+  if (skipped.length) notes.push("after a one-date probe only the cheapest airports were scanned across the window; skipped airports show at most one date (dates_checked) and may be cheaper on other dates");
+  return {
+    mode: nights ? "round_trip" : "one_way", nights, window: [start, end], grid,
+    cheapest: [...grid].sort((a, b) => a.price - b.price || (a.depart < b.depart ? -1 : 1)).slice(0, 5),
+    by_weekday: agg((g) => g.weekday), by_month: agg((g) => g.depart.slice(0, 7)), best_by_airport: bestByAirport,
+    dates_priced: grid.length, dates_in_window: allDates.length, airports_skipped_after_probe: skipped,
+    sampled: datesSampled || skipped.length > 0, note: notes.length ? `Budget limited the scan: ${notes.join("; ")}.` : null,
+    errors, calls_used: used, call_budget: budgetLimit,
   };
 }
