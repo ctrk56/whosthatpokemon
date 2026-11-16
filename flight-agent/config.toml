@@ -1,0 +1,6 @@
+home_airports = ["DFW", "DAL"]
+currency = "USD"
+cabin = "economy"
+providers = ["mock"]
+call_budget = 40
+model = "claude-sonnet-5-5"
