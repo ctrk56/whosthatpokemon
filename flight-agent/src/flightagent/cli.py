@@ -19,6 +19,7 @@ def main(argv: list[str] | None = None) -> int:
                     help="Skip the LLM: run search_flights with these JSON args and print the result")
     args = ap.parse_args(argv)
 
+    config_mod.load_dotenv()
     cfg = config_mod.load(args.config)
     runner = ToolRunner(cfg, build_providers(cfg.providers))
 

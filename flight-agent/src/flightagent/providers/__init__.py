@@ -1,7 +1,8 @@
 from .base import FlightProvider, ProviderError
+from .ignav import IgnavProvider
 from .mock import MockProvider
 
-REGISTRY = {"mock": MockProvider}
+REGISTRY = {"mock": MockProvider, "ignav": IgnavProvider}
 
 
 def build_providers(names: list[str]) -> list[FlightProvider]:

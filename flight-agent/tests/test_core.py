@@ -113,3 +113,12 @@ def test_home_airports_near_tracy():
     assert {"SCK", "SMF", "OAK", "SFO", "SJC"} <= set(codes)
     assert codes[0] == "SCK"
     assert set(CFG.home_airports) <= set(codes)
+
+
+def test_multi_origin_round_trip_fans_out_and_never_mixes_airports():
+    res = search(q(origins=("SCK", "OAK"), return_date=date(2026, 12, 8)),
+                 [MockProvider()], CallBudget(40))
+    assert res["calls_used"] == 6  # 2 airports x (round trip + 2 one-ways)
+    for o in res["offers"]:
+        if o["ticketing"] == "two_one_ways":
+            assert o["outbound"]["route"].split("->")[0] == o["inbound"]["route"].split("->")[1]

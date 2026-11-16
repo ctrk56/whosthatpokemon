@@ -53,17 +53,21 @@ def search(
     errors: list[str] = []
     tasks: list[tuple[str, str, FlightProvider, Query]] = []
     round_trip = q.return_date is not None
-    for p in providers:
-        if round_trip:
-            tasks.append(("rt", "round-trip", p, q))
-            tasks.append(("out", "outbound one-way", p, replace(q, return_date=None)))
-            tasks.append((
-                "back", "return one-way", p,
-                replace(q, origins=q.destinations, destinations=q.origins,
-                        depart_date=q.return_date, return_date=None),
-            ))
-        else:
-            tasks.append(("ow", "one-way", p, q))
+    # Providers answer one origin/destination pair per call, so budget = HTTP calls.
+    for o in q.origins:
+        for d in q.destinations:
+            pair = replace(q, origins=(o,), destinations=(d,))
+            for p in providers:
+                if round_trip:
+                    tasks.append(("rt", f"{o}-{d} round-trip", p, pair))
+                    tasks.append(("out", f"{o}->{d} one-way", p, replace(pair, return_date=None)))
+                    tasks.append((
+                        "back", f"{d}->{o} one-way", p,
+                        replace(pair, origins=(d,), destinations=(o,),
+                                depart_date=q.return_date, return_date=None),
+                    ))
+                else:
+                    tasks.append(("ow", f"{o}->{d} one-way", p, pair))
 
     def run(task):
         kind, label, p, qq = task
@@ -89,14 +93,21 @@ def search(
     best_rt = rank(buckets["rt"], q, 1)
     best_pair = None
     if round_trip:
-        outs = rank(buckets["out"], replace(q, return_date=None), 1)
+        outs = rank(buckets["out"], replace(q, return_date=None), 50)
         backs = rank(
             buckets["back"],
             replace(q, origins=q.destinations, destinations=q.origins, return_date=None),
-            1,
+            50,
         )
-        if outs and backs:
-            best_pair = _combine(outs[0], backs[0])
+        # Fly home to the airport you left from (no open-jaw mixes), cheapest sum wins.
+        pairs = [
+            _combine(o, b)
+            for o in outs for b in backs
+            if o.outbound.origin == b.outbound.destination
+            and o.outbound.destination == b.outbound.origin
+        ]
+        if pairs:
+            best_pair = min(pairs, key=lambda x: x.price)
             candidates.append(best_pair)
 
     top = rank(candidates, q, limit)
