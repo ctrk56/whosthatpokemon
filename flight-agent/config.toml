@@ -1,6 +1,0 @@
-home_airports = ["SCK", "SMF", "OAK", "SFO", "SJC"]  # all within ~110 km of Tracy, CA
-currency = "USD"
-cabin = "economy"
-providers = ["ignav"]
-call_budget = 40
-model = "claude-sonnet-5-5"
