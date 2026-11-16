@@ -430,5 +430,45 @@
   "country": "AU",
   "lat": -33.9399,
   "lon": 151.1753
+ },
+ {
+  "code": "SCK",
+  "name": "Stockton Metropolitan",
+  "city": "Stockton",
+  "country": "US",
+  "lat": 37.8942,
+  "lon": -121.2383
+ },
+ {
+  "code": "SMF",
+  "name": "Sacramento International",
+  "city": "Sacramento",
+  "country": "US",
+  "lat": 38.6954,
+  "lon": -121.5908
+ },
+ {
+  "code": "MOD",
+  "name": "Modesto City-County",
+  "city": "Modesto",
+  "country": "US",
+  "lat": 37.6258,
+  "lon": -120.9544
+ },
+ {
+  "code": "FAT",
+  "name": "Fresno Yosemite International",
+  "city": "Fresno",
+  "country": "US",
+  "lat": 36.7762,
+  "lon": -119.7181
+ },
+ {
+  "code": "STS",
+  "name": "Charles M. Schulz Sonoma County",
+  "city": "Santa Rosa",
+  "country": "US",
+  "lat": 38.509,
+  "lon": -122.8128
  }
 ]

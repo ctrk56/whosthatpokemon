@@ -7,7 +7,7 @@ from pathlib import Path
 
 @dataclass
 class Config:
-    home_airports: list[str] = field(default_factory=lambda: ["DFW", "DAL"])
+    home_airports: list[str] = field(default_factory=lambda: ["SCK", "SMF", "OAK", "SFO", "SJC"])
     currency: str = "USD"
     cabin: str = "economy"
     providers: list[str] = field(default_factory=lambda: ["mock"])

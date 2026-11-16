@@ -13,6 +13,7 @@ from flightagent.tools import ToolError, ToolRunner, build_query
 
 TODAY = date(2026, 11, 16)
 CFG = Config()
+TRACY = (37.7397, -121.4252)
 
 
 def seg(fn="AA1", o="DFW", d="LAX", h=8):
@@ -51,11 +52,11 @@ def test_mock_is_deterministic():
 
 
 def test_one_way_search_covers_both_home_airports():
-    res = search(q(origins=("DFW", "DAL")), [MockProvider()], CallBudget(10))
+    res = search(q(origins=("SCK", "OAK")), [MockProvider()], CallBudget(10))
     assert res["errors"] == [] and res["offers"]
     prices = [o["price"] for o in res["offers"]]
     assert prices == sorted(prices)
-    assert {o["outbound"]["route"].split("->")[0] for o in res["offers"]} <= {"DFW", "DAL"}
+    assert {o["outbound"]["route"].split("->")[0] for o in res["offers"]} <= {"SCK", "OAK"}
 
 
 def test_round_trip_reports_construction_verdict():
@@ -83,12 +84,12 @@ def test_failing_provider_does_not_break_search():
 
 def test_build_query_defaults_and_validation():
     qq = build_query({"destinations": ["lax"], "depart_date": "2026-12-01"}, CFG, TODAY)
-    assert qq.origins == ("DFW", "DAL") and qq.destinations == ("LAX",)
+    assert qq.origins == ("SCK", "SMF", "OAK", "SFO", "SJC") and qq.destinations == ("LAX",)
     for bad in (
         {"destinations": ["LAX"], "depart_date": "2026-01-01"},
         {"destinations": ["LAX"], "depart_date": "2026-12-05", "return_date": "2026-12-01"},
         {"destinations": ["Los Angeles"], "depart_date": "2026-12-01"},
-        {"destinations": ["DFW"], "depart_date": "2026-12-01"},
+        {"destinations": ["SFO"], "depart_date": "2026-12-01"},
         {"destinations": ["LAX"], "depart_date": "12/01"},
     ):
         with pytest.raises(ToolError):
@@ -105,3 +106,10 @@ def test_airports_resolve_and_nearby():
     assert airports.resolve("dfw")[0]["code"] == "DFW"
     assert "DAL" in {a["code"] for a in airports.nearby("DFW", 150)}
     assert {"DFW", "DAL"} <= {a["code"] for a in airports.resolve("Dallas")}
+
+
+def test_home_airports_near_tracy():
+    codes = [a["code"] for a in airports.near_point(*TRACY, 120)]
+    assert {"SCK", "SMF", "OAK", "SFO", "SJC"} <= set(codes)
+    assert codes[0] == "SCK"
+    assert set(CFG.home_airports) <= set(codes)

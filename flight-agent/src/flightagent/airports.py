@@ -52,3 +52,10 @@ def resolve(text: str, radius_km: float = 0) -> list[dict]:
                     seen.add(n["code"])
                     hits.append(n)
     return hits
+
+
+def near_point(lat: float, lon: float, radius_km: float) -> list[dict]:
+    """Airports within radius_km of a coordinate, nearest first."""
+    pt = {"lat": lat, "lon": lon}
+    out = [{**a, "distance_km": round(_km(pt, a))} for a in _all() if _km(pt, a) <= radius_km]
+    return sorted(out, key=lambda a: a["distance_km"])
